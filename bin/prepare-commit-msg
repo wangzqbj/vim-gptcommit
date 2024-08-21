@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import sh
+from langchain_core.prompts import PromptTemplate
+from langchain_openai import ChatOpenAI
+from langchain_core.pydantic_v1 import BaseModel, Field
+
+git = sh.git.bake("--no-pager")
+diff = git.diff("--cached")
+
+class GitMessage(BaseModel):
+    subject: str = Field(description="The subject of the git message")
+    message_body: str = Field(
+        description="The message body of the git message")
+
+# ref https://github.com/zurawiki/gptcommit/tree/main/prompts
+prompt_template = """
+You are an expert programmer writing a commit message.
+Write a commit message following the Linux kernel git commit style, including a subject and message body.
+The requirements for the subject are as follows:
+1. one line and no more than 50 characters
+2. The first letter should be capitalized.
+
+For the message body, the requirements are as follows:
+1. Write every summary comment in a new line.
+2. Comments should be in a bullet point list, each line starting with a `-`.
+3. The summary should not include comments copied from the code.
+4. The output should be easily readable. When in doubt, write fewer comments and not more. Do not output comments that
+simply repeat the contents of the file.
+5. Readability is top priority. Write only the most important comments about the diff.
+ 
+========= patch start ==============
+{patch}
+========= patch end ================
+
+Respond in JSON with `subject` and `message_body` keys, and the message_body should be a string"
+"""
+prompt = PromptTemplate(
+    input_variables=["patch"], template=prompt_template
+)
+
+llm = ChatOpenAI(
+    model="gpt-3.5-turbo").with_structured_output(GitMessage, method="json_mode")
+chain = prompt | llm
+
+output = chain.invoke(diff)
+subject = output.subject
+message = output.message_body
+commit_msg = f"{subject}\n\n{message}"
+print(commit_msg)
